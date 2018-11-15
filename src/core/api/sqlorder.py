@@ -1,17 +1,13 @@
 import logging
 import json
-from libs import send_email
-from libs import baseview
+from libs import baseview, util
 from libs import call_inception
-from libs import util
 from core.task import submit_push_messages
 from rest_framework.response import Response
 from django.http import HttpResponse
 from core.models import (
     DatabaseList,
-    SqlOrder,
-    Account,
-    globalpermissions
+    SqlOrder
 )
 
 CUSTOM_ERROR = logging.getLogger('Yearning.core.views')
@@ -58,7 +54,7 @@ class sqlorder(baseview.BaseView):
                     'password': data.password,
                     'db': base,
                     'port': data.port
-                    }
+                }
             except KeyError as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
             else:
@@ -68,14 +64,14 @@ class sqlorder(baseview.BaseView):
                         return Response({'result': res, 'status': 200})
                 except Exception as e:
                     CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
-                    return Response({'status': '500'})
+                    return HttpResponse(e)
 
     def post(self, request, args=None):
         try:
             data = json.loads(request.data['data'])
             tmp = json.loads(request.data['sql'])
-            user = request.data['user']
             type = request.data['type']
+            real_name = request.data['real_name']
             id = request.data['id']
         except KeyError as e:
             CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
@@ -83,11 +79,13 @@ class sqlorder(baseview.BaseView):
         else:
             try:
                 x = [x.rstrip(';') for x in tmp]
+                if str(x[0]).lstrip().startswith('use'):
+                    del x[0]
                 sql = ';'.join(x)
                 sql = sql.strip(' ').rstrip(';')
                 workId = util.workId()
                 SqlOrder.objects.get_or_create(
-                    username=user,
+                    username=request.user,
                     date=util.date(),
                     work_id=workId,
                     status=2,
@@ -97,11 +95,13 @@ class sqlorder(baseview.BaseView):
                     text=data['text'],
                     backup=data['backup'],
                     bundle_id=id,
-                    assigned=data['assigned']
-                    )
+                    assigned=data['assigned'],
+                    delay=data['delay'],
+                    real_name=real_name
+                )
                 submit_push_messages(
                     workId=workId,
-                    user=user,
+                    user=request.user,
                     addr_ip=addr_ip,
                     text=data['text'],
                     assigned=data['assigned'],

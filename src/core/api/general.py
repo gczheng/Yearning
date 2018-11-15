@@ -1,26 +1,25 @@
 import json
 import logging
+import ast
 from django.http import HttpResponse
 from rest_framework.response import Response
-from libs import baseview, con_database
-from core.task import grained_permissions
+from libs import baseview, con_database, util
+from core.task import grained_permissions, set_auth_group
+from core.api import serachsql
 from core.models import (
     DatabaseList,
     Account,
-    grained,
     SqlDictionary
 )
 from libs.serializers import (
     Area,
-    UserINFO,
-    query_con
+    UserINFO
 )
 
 CUSTOM_ERROR = logging.getLogger('Yearning.core.views')
 
 
 class addressing(baseview.BaseView):
-
     '''
 
     :argument 连接名 库名 表名 字段名 索引名 api接口
@@ -33,6 +32,9 @@ class addressing(baseview.BaseView):
 
         if args == 'connection':
             try:
+                assigned = set_auth_group(request.user)
+                un_init = util.init_conf()
+                custom_com = ast.literal_eval(un_init['other'])
                 if request.data['permissions_type'] == 'user' or request.data['permissions_type'] == 'own_space':
                     info = DatabaseList.objects.all()
                     con_name = Area(info, many=True).data
@@ -40,15 +42,27 @@ class addressing(baseview.BaseView):
                     dic.query.distinct = ['Name']
 
                 elif request.data['permissions_type'] == 'query':
-                    datalist = DatabaseList.objects.all()
-                    serializers = query_con(datalist, many=True)
-                    assigned = grained.objects.filter(username=request.user).first()
-                    return Response({'assigend': assigned.permissions['person'],'connection': serializers.data})
+                    con_name = []
+                    permission_spec = set_auth_group(request.user)
+                    if permission_spec['query'] == '1':
+                        for i in permission_spec['querycon']:
+                            con_instance = DatabaseList.objects.filter(connection_name=i).first()
+                            if con_instance:
+                                con_name.append(
+                                    {
+                                        'id': con_instance.id,
+                                        'connection_name': con_instance.connection_name,
+                                        'ip': con_instance.ip ,
+                                        'computer_room': con_instance.computer_room
+                                    })
+                    assigned = set_auth_group(request.user)
+                    return Response({'assigend': assigned['person'], 'connection': con_name,
+                                     'custom': custom_com['con_room']})
                 else:
                     con_name = []
                     _type = request.data['permissions_type'] + 'con'
-                    permission_spec = grained.objects.filter(username=request.user).first()
-                    for i in permission_spec.permissions[_type]:
+                    permission_spec = set_auth_group(request.user)
+                    for i in permission_spec[_type]:
                         con_instance = DatabaseList.objects.filter(connection_name=i).first()
                         if con_instance:
                             con_name.append(
@@ -59,10 +73,18 @@ class addressing(baseview.BaseView):
                                     'computer_room': con_instance.computer_room
                                 })
                     dic = ''
-                info = Account.objects.filter(is_staff=1).all()
+                info = Account.objects.filter(group='admin').all()
                 serializers = UserINFO(info, many=True)
-                assigned = grained.objects.filter(username=request.user).first()
-                return Response({'connection': con_name, 'person': serializers.data, 'dic': dic, 'assigend': assigned.permissions['person']})
+                return Response(
+                    {
+                        'connection': con_name,
+                        'person': serializers.data,
+                        'dic': dic,
+                        'assigend': assigned['person'],
+                        'custom': custom_com['con_room'],
+                        'multi': custom_com['multi']
+                    }
+                )
             except Exception as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
                 return HttpResponse(status=500)
@@ -77,12 +99,16 @@ class addressing(baseview.BaseView):
                 _connection = DatabaseList.objects.filter(id=con_id).first()
                 try:
                     with con_database.SQLgo(
-                        ip=_connection.ip,
-                        user=_connection.username,
-                        password=_connection.password,
-                        port=_connection.port
+                            ip=_connection.ip,
+                            user=_connection.username,
+                            password=_connection.password,
+                            port=_connection.port
                     ) as f:
-                        res = f.basename()
+                        res = f.baseItems(sql='show databases')
+                        exclude_db = serachsql.exclued_db_list()
+                        for db in exclude_db:
+                            if db in res:
+                                res.remove(db)
                         return Response(res)
                 except Exception as e:
                     CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
@@ -99,13 +125,13 @@ class addressing(baseview.BaseView):
                 _connection = DatabaseList.objects.filter(id=con_id).first()
                 try:
                     with con_database.SQLgo(
-                        ip=_connection.ip,
-                        user=_connection.username,
-                        password=_connection.password,
-                        port=_connection.port,
-                        db=basename
+                            ip=_connection.ip,
+                            user=_connection.username,
+                            password=_connection.password,
+                            port=_connection.port,
+                            db=basename
                     ) as f:
-                        res = f.tablename()
+                        res = f.baseItems(sql='show tables')
                         return Response(res)
                 except Exception as e:
                     CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
@@ -123,11 +149,11 @@ class addressing(baseview.BaseView):
                 try:
                     _connection = DatabaseList.objects.filter(id=con_id).first()
                     with con_database.SQLgo(
-                        ip=_connection.ip,
-                        user=_connection.username,
-                        password=_connection.password,
-                        port=_connection.port,
-                        db=basename
+                            ip=_connection.ip,
+                            user=_connection.username,
+                            password=_connection.password,
+                            port=_connection.port,
+                            db=basename
                     ) as f:
                         res = f.gen_alter(table_name=table)
                         return Response(res)
@@ -147,16 +173,14 @@ class addressing(baseview.BaseView):
                 try:
                     _connection = DatabaseList.objects.filter(id=con_id).first()
                     with con_database.SQLgo(
-                        ip=_connection.ip,
-                        user=_connection.username,
-                        password=_connection.password,
-                        port=_connection.port,
-                        db=basename
+                            ip=_connection.ip,
+                            user=_connection.username,
+                            password=_connection.password,
+                            port=_connection.port,
+                            db=basename
                     ) as f:
                         res = f.index(table_name=table)
                         return Response(res)
                 except Exception as e:
                     CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
-                    return Response(e)
-
-
+                    return HttpResponse(e)

@@ -10,16 +10,21 @@ cookie
 
 from urllib import request
 from collections import namedtuple
+from libs import con_database
 import json
 import random
 import ssl
 import time
 import ldap3
+from ldap3 import Connection, SUBTREE
 import configparser
+import ast
+
+_conf = configparser.ConfigParser()
+_conf.read('deploy.conf')
 
 
 def dingding(content: str = None, url: str = None):
-
     '''
 
     dingding webhook
@@ -72,44 +77,127 @@ def conf_path() -> object:
     '''
     读取配置文件属性
     '''
-    _conf = configparser.ConfigParser()
-    _conf.read('deploy.conf')
-    conf_set = namedtuple("name", ["db", "address", "port", "username", "password", "ipaddress",
-                                   "inc_host", "inc_port", "inc_user", "inc_pwd", "backupdb",
-                                   "backupport", "backupuser", "backuppassword","ladp_server",
-                                   "ldap_scbase","ladp_domain", "ladp_type","mail_user","mail_password","smtp",
-                                   "smtp_port", "limit"])
+    conf_set = namedtuple("name", ["db", "address", "port", "username", "password", "ipaddress"])
 
     return conf_set(_conf.get('mysql', 'db'), _conf.get('mysql', 'address'),
                     _conf.get('mysql', 'port'), _conf.get('mysql', 'username'),
-                    _conf.get('mysql', 'password'), _conf.get('host', 'ipaddress'),
-                    _conf.get('Inception', 'ip'), _conf.get('Inception', 'port'),
-                    _conf.get('Inception', 'user'), _conf.get('Inception', 'password'),
-                    _conf.get('Inception', 'backupdb'), _conf.get('Inception', 'backupport'),
-                    _conf.get('Inception', 'backupuser'), _conf.get('Inception', 'backuppassword'),
-                    _conf.get('LDAP','LDAP_SERVER'),_conf.get('LDAP','LDAP_SCBASE'),_conf.get('LDAP','LDAP_DOMAIN'),_conf.get('LDAP','LDAP_TYPE'),
-                    _conf.get('email', 'username'), _conf.get('email', 'password'), _conf.get('email', 'smtp_server'),
-                    _conf.get('email', 'smtp_port'),_conf.get('sql', 'limit'))
+                    _conf.get('mysql', 'password'), _conf.get('host', 'ipaddress'))
 
-def auth(username, password):
-    conf = conf_path()
-    LDAP_SERVER = conf.ladp_server
-    LDAP_DOMAIN = conf.ladp_domain
-    LDAP_TYPE = conf.ladp_type
-    LDAP_SCBASE = conf.ldap_scbase
-    if LDAP_TYPE == '1':
-        user = username + '@' + LDAP_DOMAIN
-    elif LDAP_TYPE == '2':
-        user = "uid=%s,%s" % (username, LDAP_SCBASE)
+
+def test_auth(username, password, host, type, sc, domain, ou):
+    if type == '1':
+        user = username + '@' + domain
+    elif type == '2':
+        user = "uid=%s,%s" % (username, sc)
     else:
-        user = "cn=%s,%s" % (username, LDAP_SCBASE)
+        user = "cn=%s,%s" % (username, sc)
     c = ldap3.Connection(
-        ldap3.Server(LDAP_SERVER, get_info=ldap3.ALL),
+        ldap3.Server(host, get_info=ldap3.ALL),
         user=user,
         password=password)
     ret = c.bind()
-    if ret:
-        c.unbind()
-        return True
+    if not ret:
+        if ou:
+            res = c.search(
+                search_base=sc,
+                search_filter='(cn={})'.format(username),
+                search_scope=SUBTREE,
+                attributes=['cn', 'uid', 'mail'],
+            )
+            if res:
+                entry = c.response[0]
+                dn = entry['dn']
+                attr_dict = entry['attributes']
+
+                # check password by dn
+                try:
+                    conn2 = Connection(ldap3.Server(host, get_info=ldap3.ALL), user=dn, password=password,
+                                       check_names=True, lazy=False, raise_exceptions=False)
+                    conn2.bind()
+                    if conn2.result["description"] == "success":
+                        print((True, attr_dict["mail"], attr_dict["cn"], attr_dict["uid"]))
+                        c.unbind()
+                        conn2.unbind()
+                        return True
+                    else:
+                        print("auth fail")
+                        return False
+                except:
+                    print("auth fail")
+                    return False
+        else:
+            return True
     else:
         return False
+
+
+def auth(username, password):
+    un_init = init_conf()
+    ldap = ast.literal_eval(un_init['ldap'])
+    # 后台录入的验证用户信息，连接到ldap后通过查询登陆的用户名所在的OU，DN信息，然后进一步去ldap服务器进行账户和密码验证。
+    LDAP_ADMIN_USER = ldap['user']
+    LDAP_ADMIN_PASS = ldap['password']
+
+    LDAP_SERVER = ldap['host']
+    LDAP_DOMAIN = ldap['domain']
+    LDAP_TYPE = ldap['type']
+    LDAP_SCBASE = ldap['sc']
+    # 这里前端可以做个基础DN录入，搜索范围锁定在这个DN下
+    SEARCH_BASE = ldap['sc']
+
+    if LDAP_TYPE == '1':
+        user = username + '@' + LDAP_DOMAIN
+    elif LDAP_TYPE == '2':
+        user = "uid=%s,%s" % (LDAP_ADMIN_USER, LDAP_SCBASE)
+    else:
+        user = "cn=%s,%s" % (LDAP_ADMIN_USER, LDAP_SCBASE)
+    c = ldap3.Connection(
+        ldap3.Server(LDAP_SERVER, get_info=ldap3.ALL),
+        user=user,
+        password=LDAP_ADMIN_PASS)
+    ret = c.bind()
+    if not ret:
+        if ldap['ou']:
+            res = c.search(
+                search_base=SEARCH_BASE,
+                search_filter='(cn={})'.format(username),
+                search_scope=SUBTREE,
+                attributes=['cn', 'uid', 'mail'],
+            )
+            if res:
+                entry = c.response[0]
+                dn = entry['dn']
+                attr_dict = entry['attributes']
+
+                # check password by dn
+                try:
+                    conn2 = Connection(ldap3.Server(LDAP_SERVER, get_info=ldap3.ALL), user=dn, password=password,
+                                       check_names=True, lazy=False, raise_exceptions=False)
+                    conn2.bind()
+                    if conn2.result["description"] == "success":
+                        print((True, attr_dict["mail"], attr_dict["cn"], attr_dict["uid"]))
+                        c.unbind()
+                        conn2.unbind()
+                        return True
+                    else:
+                        print("auth fail")
+                        return False
+                except:
+                    print("auth fail")
+                    return False
+        else:
+            return True
+    else:
+        return False
+
+
+def init_conf():
+    with con_database.SQLgo(
+            ip=_conf.get('mysql', 'address'),
+            user=_conf.get('mysql', 'username'),
+            password=_conf.get('mysql', 'password'),
+            db=_conf.get('mysql', 'db'),
+            port=_conf.get('mysql', 'port')) as f:
+        res = f.query_info("select * from core_globalpermissions where authorization = 'global'")
+
+    return res[0]

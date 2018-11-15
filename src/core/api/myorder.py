@@ -1,6 +1,5 @@
 import logging
 from libs import baseview, util
-from django.db.models import Count
 from core.models import SqlOrder
 from django.http import HttpResponse
 from rest_framework.response import Response
@@ -9,14 +8,13 @@ CUSTOM_ERROR = logging.getLogger('Yearning.core.views')
 
 
 class order(baseview.BaseView):
-
     '''
 
     :argument 我的工单展示接口api
 
     '''
 
-    def get(self, request, args: str=None):
+    def get(self, request, args: str = None):
         try:
             username = request.GET.get('user')
             page = request.GET.get('page')
@@ -25,7 +23,7 @@ class order(baseview.BaseView):
         else:
             try:
                 page_number = SqlOrder.objects.filter(
-                    username=username).aggregate(alter_number=Count('id'))
+                    username=username).count()
                 start = (int(page) - 1) * 20
                 end = int(page) * 20
                 info = SqlOrder.objects.raw(

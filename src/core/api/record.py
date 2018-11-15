@@ -1,15 +1,15 @@
 import logging
 import json
-from libs import baseview, util, rollback
+from libs import baseview, rollback, util
 from rest_framework.response import Response
 from django.http import HttpResponse
 from core.models import SqlOrder, SqlRecord
 from libs.serializers import Record
+
 CUSTOM_ERROR = logging.getLogger('Yearning.core.views')
 
 
 class record_order(baseview.SuperUserpermissions):
-
     '''
 
     :argument 记录展示请求接口api
@@ -27,8 +27,7 @@ class record_order(baseview.SuperUserpermissions):
             return HttpResponse(status=500)
         else:
             try:
-                pagenumber = SqlOrder.objects.filter(status=1, assigned=username).all().values('id')
-                pagenumber.query.distinct = ['id']
+                pagenumber = SqlOrder.objects.filter(status=1, assigned=username).count()
                 start = int(page) * 10 - 10
                 end = int(page) * 10
                 sql = SqlOrder.objects.raw(
@@ -38,17 +37,16 @@ class record_order(baseview.SuperUserpermissions):
                     INNER JOIN core_databaselist on \
                     core_sqlorder.bundle_id = core_databaselist.id where core_sqlorder.status = 1 and core_sqlorder.assigned = '%s'\
                     ORDER BY core_sqlorder.id desc
-                    '''%username
+                    ''' % username
                 )[start:end]
                 data = util.ser(sql)
-                return Response({'data': data, 'page': len(pagenumber)})
+                return Response({'data': data, 'page': pagenumber})
             except Exception as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
                 return HttpResponse(status=500)
 
 
 class order_detail(baseview.BaseView):
-
     '''
 
     :argument 执行工单的详细信息请求接口api
@@ -75,13 +73,13 @@ class order_detail(baseview.BaseView):
         else:
             type_id = SqlOrder.objects.filter(id=order_id).first()
             try:
-                if status == '1':
+                if status == '1' or status == '4':
                     data = SqlRecord.objects.filter(workid=work_id).all()
                     _serializers = Record(data, many=True)
-                    return Response({'data':_serializers.data, 'type':type_id.type})
+                    return Response({'data': _serializers.data, 'type': type_id.type})
                 else:
                     data = SqlOrder.objects.filter(work_id=work_id).first()
-                    _in = {'data':[{'sql': x} for x in data.sql.split(';')], 'type':type_id.type}
+                    _in = {'data': [{'sql': x} for x in data.sql.split(';')], 'type': type_id.type}
                     return Response(_in)
             except Exception as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__} : {e}')
@@ -115,7 +113,7 @@ class order_detail(baseview.BaseView):
                 _tmp = ''
                 for i in sql:
                     _tmp += i + ";\n"
-                return Response({'data':data[0], 'sql':_tmp.strip('\n'), 'type': 0})
+                return Response({'data': data[0], 'sql': _tmp.strip('\n'), 'type': 0})
             except Exception as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
                 return HttpResponse(status=500)
@@ -152,13 +150,14 @@ class order_detail(baseview.BaseView):
                     data = util.ser(info)
                     _data = SqlRecord.objects.filter(sequence=i).first()
                     roll = rollback.rollbackSQL(db=_data.backup_dbname, opid=i)
-                    link = _data.backup_dbname + '.' + roll
+                    link = _data.backup_dbname + '.' + roll['tablename']
                     sql.append(rollback.roll(backdb=link, opid=i))
                 for i in sql:
                     for c in i:
                         rollback_sql.append(c['rollback_statement'])
                 rollback_sql = sorted(rollback_sql)
                 if rollback_sql == []: return HttpResponse(status=500)
+                rollback_sql = [{'sql': x} for x in rollback_sql]
                 return Response({'data': data[0], 'sql': rollback_sql, 'type': 1})
             except Exception as e:
                 CUSTOM_ERROR.error(f'{e.__class__.__name__}: {e}')
