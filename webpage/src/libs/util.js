@@ -8,7 +8,7 @@ util.title = function (title) {
   window.document.title = title
 }
 
-util.mode = function typeok (obj) {
+util.mode = function (obj) {
   let oc = {}
   Object.keys(obj).forEach(function (key) {
     if (typeof obj[key] === 'string') {
@@ -48,22 +48,6 @@ util.url = location.protocol + '//' + document.domain + ':8000/api/v1'
 
 util.auth = location.protocol + '//' + document.domain + ':8000/api-token-auth/'
 
-util.ajanxerrorcode = function (vm, error) {
-  if (error.response) {
-    if (error.response.status === 401) {
-      vm.$router.push({name: 'error_401'})
-    } else if (error.response.status === 400) {
-      Notice.error({title: '警告', desc: '账号密码错误,请重新输入!'})
-    } else if (error.response.status === 500) {
-      vm.$router.push({name: 'error_500'})
-    } else if (error.response.status === 404) {
-      vm.$router.push({name: 'error_404'})
-    } else {
-      Notice.error({title: '警告', desc: error.response})
-    }
-  }
-}
-
 util.oneOf = function (ele, targetArr) {
   if (targetArr.indexOf(ele) >= 0) {
     return true
@@ -93,9 +77,6 @@ util.taglist = function (vm, name) {
       vm.$store.state.pageOpenedList.splice(index, 1)
     }
   })
-  if (name === 'myorder') {
-    vm.$store.state.pageOpenedList.push({'title': '我的工单', 'name': 'myorder'})
-  }
   appRouter.forEach((val) => {
     for (let i of val.children) {
       if (i.name === name && name !== 'home_index') {
@@ -104,6 +85,24 @@ util.taglist = function (vm, name) {
     }
   })
   localStorage.setItem('pageOpenedList', JSON.stringify(vm.$store.state.pageOpenedList))
+}
+
+util.clearObj = function (obj) {
+  for (let i in obj) {
+    if (typeof obj[i] === 'object') {
+      obj[i] = []
+    } else {
+      obj[i] = ''
+    }
+  }
+  return obj
+}
+
+util.sameMerge = function (obj, merge, el) {
+  for (let i of el) {
+    obj[i] = merge[i]
+  }
+  return obj
 }
 
 export default util

@@ -29,7 +29,7 @@
                 <Input v-model="formInline.user" placeholder="Username"></Input>
               </Form-item>
               <Form-item prop="password" style="width: 100%">
-                <Input type="password" v-model="formInline.password" placeholder="Password"></Input>
+                <Input type="password" v-model="formInline.password" placeholder="Password" @on-keyup.enter="authdata"></Input>
               </Form-item>
               <Form-item style="width: 100%">
                 <Button type="primary" @click="authdata()" style="width: 100%" size="large">登录</Button>
@@ -47,7 +47,7 @@
               </Form-item>
               <Form-item prop="password" style="width: 100%">
                 <Input type="password" v-model="formInline.password" placeholder="ldap_Password"
-                       @on-keyup.enter="authdata()"></Input>
+                       @on-keyup.enter="ldap_login()"></Input>
               </Form-item>
               <Form-item style="width: 100%">
                 <Button type="primary" @click="ldap_login()" style="width: 100%" size="large">登录</Button>
@@ -96,7 +96,6 @@
 </template>
 <script>
   import axios from 'axios'
-  import util from './libs/util'
   import ICol from '../node_modules/iview/src/components/grid/col.vue'
   //
   export default {
@@ -194,11 +193,11 @@
       LoginRegister () {
         this.$refs['userinfova'].validate((valid) => {
           if (valid) {
-            axios.post(`${util.url}/loginregister/`, {
+            axios.post(`${this.$config.url}/loginregister/`, {
               'userinfo': JSON.stringify(this.userinfo)
             })
               .then(res => {
-                util.notice(res.data)
+                this.$config.notice(res.data)
                 this.userinfo = {
                   username: '',
                   password: '',
@@ -209,15 +208,15 @@
                 }
               })
               .catch(error => {
-                util.err_notice(error)
+                this.$config.err_notice(error)
               })
           } else {
-            util.err_notice('请正确填写相关注册信息！')
+            this.$config.err_notice('请正确填写相关注册信息！')
           }
         })
       },
       authdata () {
-        axios.post(util.auth, {
+        axios.post(this.$config.auth, {
           'username': this.formInline.user,
           'password': this.formInline.password
         })
@@ -237,12 +236,12 @@
               name: 'home_index'
             })
           })
-          .catch(error => {
-            util.ajanxerrorcode(this, error)
+          .catch(() => {
+            this.$config.err_notice(this, '账号密码错误,请重新输入!')
           })
       },
       ldap_login () {
-        axios.post(`${util.url}/ldapauth`, {
+        axios.post(`${this.$config.url}/ldapauth`, {
           'username': this.formInline.user,
           'password': this.formInline.password
         })
@@ -258,7 +257,7 @@
               sessionStorage.setItem('jwt', `JWT ${res.data['token']}`)
               sessionStorage.setItem('auth', res.data['permissions'])
               let auth = res.data['permissions']
-              if (auth === 'admin') {
+              if (auth === 'admin' || auth === 'perform') {
                 sessionStorage.setItem('access', 0)
               } else {
                 sessionStorage.setItem('access', 1)
@@ -268,8 +267,8 @@
               })
             }
           })
-          .catch(error => {
-            util.ajanxerrorcode(this, error)
+          .catch(() => {
+            this.$config.err_notice(this, '账号密码错误,请重新输入!')
           })
       }
     },
